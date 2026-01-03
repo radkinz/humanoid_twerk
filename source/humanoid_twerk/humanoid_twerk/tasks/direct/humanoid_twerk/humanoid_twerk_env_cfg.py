@@ -122,15 +122,15 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
 @configclass
 class HumanoidTwerkEnvCfg(HumanoidEnvCfg):
     """Custom humanoid env cfg for jump/airtime shaping (pre-twerk)."""
-
-    # reward shaping scalars (match what your env uses)
-    height_reward_scale: float = 1.0
-    jump_progress_scale: float = 0.2
-    jump_actions_cost_scale: float = 0.005
-
-    air_time_reward_scale: float = 2.0
+    twerk_reward_scale: float = 2.0
+    twerk_freq_hz: float = 2.5
+    twerk_amp_m: float = 0.08
+    twerk_track_k: float = 10.0
     contact_force_threshold: float = 5.0
-    jump_height_reward_scale: float = 2.0
+    height_reward_scale: float = 1.0
+    jump_actions_cost_scale: float = 0.005
+    alive_reward_scale: float = 2.0
+    death_cost: float = -1.0
 
     def __post_init__(self):
         super().__post_init__()
