@@ -10,31 +10,26 @@ class HumanoidTwerkEnv(LocomotionEnv):
 
     def __init__(self, cfg: HumanoidTwerkEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-        self.prev_height = torch.zeros(self.num_envs, device=self.sim.device)
-        self.stand_height = torch.zeros(self.num_envs, device=self.sim.device)
-        self.peak_height = torch.zeros(self.num_envs, device=self.sim.device)
         self.air_time = torch.zeros(self.num_envs, device=self.sim.device)
         #twerk logic
         self.pelvis_z0 = torch.zeros(self.num_envs, device=self.sim.device)
         self.phase = torch.zeros(self.num_envs, device=self.sim.device)
         self._pelvis_i = None
+        print(self.robot.data.joint_names)
+        #knee joints to make sure they are bent
+        self._rshin = None
+        self._lshin = None
 
-
-
-    def _height(self, env_ids=None):
-        # Prefer torso position if the base env exposes it
-        if hasattr(self, "torso_position"):
-            return self.torso_position[:, 2] if env_ids is None else self.torso_position[env_ids, 2]
-        # Fallback: robot root height
-        return self.robot.data.root_pos_w[:, 2] if env_ids is None else self.robot.data.root_pos_w[env_ids, 2]
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
 
-        # pelvis index once
+        # pelvis, right & left knee indexing
         if self._pelvis_i is None:
             names = list(self.scene["robot"].data.body_names)
             self._pelvis_i = names.index("pelvis")
+            self._rshin = names.index("right_shin")
+            self._lshin = names.index("left_shin")
 
         # current pelvis height
         pelvis_z = self.robot.data.body_pos_w[env_ids, self._pelvis_i, 2]
@@ -43,19 +38,10 @@ class HumanoidTwerkEnv(LocomotionEnv):
         # randomize phase so all envs aren't synchronized
         self.phase[env_ids] = 2.0 * torch.pi * torch.rand(len(env_ids), device=self.sim.device)
 
-
         self.air_time[env_ids] = 0.0
-
-        h = self._height(env_ids)
-        self.stand_height[env_ids] = h
-        self.peak_height[env_ids] = h
-        self.prev_height[env_ids] = h  # avoids a big first-step spike
 
     def _compute_intermediate_values(self):
         super()._compute_intermediate_values()
-
-        self.curr_height = self._height()
-        self.peak_height = torch.maximum(self.peak_height, self.curr_height)
 
         #twerk checker
         # advance phase (same for all envs; you can randomize at reset later)
@@ -66,36 +52,27 @@ class HumanoidTwerkEnv(LocomotionEnv):
         self.pelvis_z = pelvis_z
 
     
-        # ContactSensor forces: (num_envs, 1, 3)
-        fz_l = self.scene["contact_LF"].data.net_forces_w[:, 0, 2].abs()
-        fz_r = self.scene["contact_RF"].data.net_forces_w[:, 0, 2].abs()
-        th = self.cfg.contact_force_threshold
-        both_planted = (fz_l > th) & (fz_r > th) #higher the force then the feet are on the ground triggering sensor
-
-        self.air_time = torch.where(
-            both_planted,
-            self.air_time + self.cfg.sim.dt,
-            torch.zeros_like(self.air_time),
-        )
-    
     def _get_rewards(self) -> torch.Tensor:
-        """Twerk reward: track a sinusoidal pelvis-height motion while keeping BOTH feet planted."""
-        # --- basic terms you already had ---
+        """Twerk reward: track a sinusoidal pelvis-height motion while keeping both feet planted and knees bent."""
         actions_cost = torch.sum(self.actions ** 2, dim=-1)
-
-        # keep these for stability / debugging
-        if not hasattr(self, "curr_height"):
-            # fallback if you didn't set curr_height elsewhere
-            if hasattr(self, "torso_position"):
-                self.curr_height = self.torso_position[:, 2]
-            else:
-                self.curr_height = self.robot.data.root_pos_w[:, 2]
 
         # --- contact forces (feet planted gate) ---
         fz_l = self.scene["contact_LF"].data.net_forces_w[:, 0, 2].abs()
         fz_r = self.scene["contact_RF"].data.net_forces_w[:, 0, 2].abs()
         th = self.cfg.contact_force_threshold
         both_planted = (fz_l > th) & (fz_r > th)  # (num_envs,)
+
+        # --- knees planted
+        q = self.robot.data.joint_pos  # (num_envs, num_joints)
+
+        r = q[:, self._rshin]
+        l = q[:, self._lshin]
+
+        # pick a target bend; SIGN may be + or - depending on the model
+        target = self.cfg.knee_target_rad
+
+        knee_err = 0.5 * ((r - target) ** 2 + (l - target) ** 2)
+        knee_rew = torch.exp(-self.cfg.knee_k * knee_err)   # in (0, 1]
 
         # --- pelvis height signal ---
         # pelvis index (once)
@@ -136,9 +113,9 @@ class HumanoidTwerkEnv(LocomotionEnv):
         # --- final reward ---
         reward = (
             self.cfg.alive_reward_scale
-            + self.cfg.height_reward_scale * self.curr_height
-            + self.cfg.twerk_reward_scale * twerk_track
-            - self.cfg.jump_actions_cost_scale * actions_cost
+            + self.cfg.twerk_reward_scale * twerk_track #reward moving pelvis
+            - self.cfg.jump_actions_cost_scale * actions_cost #punish jumping aka reward feet planted
+            + self.cfg.knee_reward_scale * knee_rew #reward knees planted
         )
 
         # death / terminated handling
@@ -147,10 +124,6 @@ class HumanoidTwerkEnv(LocomotionEnv):
             torch.full_like(reward, self.cfg.death_cost),
             reward,
         )
-
-        # keep prev_height updated if you still use it elsewhere
-        if hasattr(self, "prev_height"):
-            self.prev_height[:] = self.curr_height
 
         return reward
 

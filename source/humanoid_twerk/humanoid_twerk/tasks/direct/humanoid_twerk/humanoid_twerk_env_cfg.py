@@ -127,10 +127,13 @@ class HumanoidTwerkEnvCfg(HumanoidEnvCfg):
     twerk_amp_m: float = 0.08
     twerk_track_k: float = 10.0
     contact_force_threshold: float = 5.0
-    height_reward_scale: float = 1.0
     jump_actions_cost_scale: float = 0.005
     alive_reward_scale: float = 2.0
     death_cost: float = -1.0
+    # knee-bend (shin joints) shaping
+    knee_reward_scale: float = 1.0
+    knee_target_rad: float = 0.8   # if bends wrong way, flip to -0.8
+    knee_k: float = 8.0
 
     def __post_init__(self):
         super().__post_init__()
