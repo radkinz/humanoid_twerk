@@ -16,6 +16,28 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import ContactSensorCfg
 
+WIDE_SQUAT_INIT = ArticulationCfg.InitialStateCfg(
+    # base pose (raise/lower to taste)
+    pos=(0.0, 0.0, 1.25),
+    # IMPORTANT: these are JOINT NAMES from your print
+    joint_pos={
+        # widen stance (hip ab/adduction-ish)
+        "right_thigh:0": -0.35,
+        "left_thigh:0":  -0.35,
+
+        # squat (knee/shin bend)
+        "right_shin": -0.9,
+        "left_shin":  -0.9,
+
+        # # slight ankle compensation (optional)
+        "right_foot:0": -0.2,
+        "left_foot:0":  -0.2,
+
+        # # keep arms chill (optional)
+        "right_upper_arm:0": 0.2,
+        "left_upper_arm:0":  0.2,
+    },
+)
 
 @configclass
 class HumanoidTwerkSceneCfg(InteractiveSceneCfg):
@@ -26,7 +48,7 @@ class HumanoidTwerkSceneCfg(InteractiveSceneCfg):
     """
 
     # robot (also kept at top-level cfg.robot for compatibility with base env)
-    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot",  init_state=WIDE_SQUAT_INIT)
 
     contact_LF: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/left_foot",
@@ -77,7 +99,7 @@ class HumanoidEnvCfg(DirectRLEnvCfg):
     )
 
     # robot (some direct env code references cfg.robot, so keep it here too)
-    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    robot: ArticulationCfg = HUMANOID_CFG.replace(prim_path="/World/envs/env_.*/Robot",  init_state=WIDE_SQUAT_INIT)
 
     # misc humanoid params (kept from your original cfg)
     joint_gears: list = [
@@ -132,8 +154,14 @@ class HumanoidTwerkEnvCfg(HumanoidEnvCfg):
     death_cost: float = -1.0
     # knee-bend (shin joints) shaping
     knee_reward_scale: float = 1.0
-    knee_target_rad: float = 0.8   # if bends wrong way, flip to -0.8
+    knee_target_rad: float = -0.8   # if bends wrong way, flip to -0.8
     knee_k: float = 8.0
+    stance_width_reward_scale: float = 1.0
+    stance_width_target_m: float = 0.35
+    stance_width_k: float = 30.0   # higher = tighter tracking
+    stance_width_min_m: float = 0.25
+    stance_min_reward_scale: float = 0.5
+
 
     def __post_init__(self):
         super().__post_init__()

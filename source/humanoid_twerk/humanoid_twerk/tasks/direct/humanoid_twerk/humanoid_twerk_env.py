@@ -15,21 +15,34 @@ class HumanoidTwerkEnv(LocomotionEnv):
         self.pelvis_z0 = torch.zeros(self.num_envs, device=self.sim.device)
         self.phase = torch.zeros(self.num_envs, device=self.sim.device)
         self._pelvis_i = None
-        print(self.robot.data.joint_names)
         #knee joints to make sure they are bent
         self._rshin = None
         self._lshin = None
+        #foot to widen their stance
+        self._rf_body = None
+        self._lf_body = None
 
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
 
         # pelvis, right & left knee indexing
+        names = list(self.scene["robot"].data.body_names)
         if self._pelvis_i is None:
-            names = list(self.scene["robot"].data.body_names)
             self._pelvis_i = names.index("pelvis")
-            self._rshin = names.index("right_shin")
-            self._lshin = names.index("left_shin")
+        
+        joints = list(self.scene["robot"].data.joint_names)
+        if self._rshin is None:
+            self._rshin = joints.index("right_shin")
+
+        if self._lshin is None:
+            self._lshin = joints.index("left_shin")
+
+        if self._rf_body is None:
+            self._rf_body = names.index("right_foot")
+
+        if self._lf_body is None:
+            self._lf_body = names.index("left_foot")
 
         # current pelvis height
         pelvis_z = self.robot.data.body_pos_w[env_ids, self._pelvis_i, 2]
@@ -51,7 +64,6 @@ class HumanoidTwerkEnv(LocomotionEnv):
         pelvis_z = self.robot.data.body_pos_w[:, self._pelvis_i, 2]
         self.pelvis_z = pelvis_z
 
-    
     def _get_rewards(self) -> torch.Tensor:
         """Twerk reward: track a sinusoidal pelvis-height motion while keeping both feet planted and knees bent."""
         actions_cost = torch.sum(self.actions ** 2, dim=-1)
@@ -70,7 +82,6 @@ class HumanoidTwerkEnv(LocomotionEnv):
 
         # pick a target bend; SIGN may be + or - depending on the model
         target = self.cfg.knee_target_rad
-
         knee_err = 0.5 * ((r - target) ** 2 + (l - target) ** 2)
         knee_rew = torch.exp(-self.cfg.knee_k * knee_err)   # in (0, 1]
 
@@ -110,13 +121,29 @@ class HumanoidTwerkEnv(LocomotionEnv):
         # only count it when both feet are planted
         twerk_track = twerk_track * both_planted.float()
 
+        # feet stance
+        lf_y = self.robot.data.body_pos_w[:, self._lf_body, 1]
+        rf_y = self.robot.data.body_pos_w[:, self._rf_body, 1]
+        stance_w = torch.abs(lf_y - rf_y)  # meters
+        
+        w_star = self.cfg.stance_width_target_m
+        width_err = (stance_w - w_star) ** 2
+        stance_rew = torch.exp(-self.cfg.stance_width_k * width_err)
+        stance_rew = stance_rew * both_planted.float()
+
         # --- final reward ---
         reward = (
             self.cfg.alive_reward_scale
             + self.cfg.twerk_reward_scale * twerk_track #reward moving pelvis
             - self.cfg.jump_actions_cost_scale * actions_cost #punish jumping aka reward feet planted
             + self.cfg.knee_reward_scale * knee_rew #reward knees planted
+            + self.cfg.stance_width_reward_scale * stance_rew
         )
+
+        w_min = self.cfg.stance_width_min_m
+        stance_min = torch.clamp((stance_w - w_min) / w_min, 0.0, 1.0)
+        reward += both_planted.float() * self.cfg.stance_min_reward_scale * stance_min
+
 
         # death / terminated handling
         reward = torch.where(
