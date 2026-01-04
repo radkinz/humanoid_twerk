@@ -6,7 +6,7 @@ The learned policy controls joint positions to:
 
 * keep both feet planted
 * maintain a wide, squatted stance
-* hold bent knees**
+* hold bent knees
 * avoid walking, slipping, or kneeling
 * produce a rhythmic vertical pelvis motion
 
