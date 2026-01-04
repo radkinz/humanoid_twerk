@@ -27,14 +27,19 @@ ENV_ROBOT = "/World/envs/env_.*/Robot"
 WIDE_SQUAT_INIT = ArticulationCfg.InitialStateCfg(
     pos=(0.0, 0.0, 1.25),
     joint_pos={
+        # wide stance
         "right_thigh:0": -0.25,
         "left_thigh:0":  -0.25,
+        # bend knees slightly
         "right_shin": -0.5,
         "left_shin":  -0.5,
-        "right_foot:0": -0.2,
-        "left_foot:0":  -0.2,
-        "right_upper_arm:0": 0.2,
-        "left_upper_arm:0":  0.2,
+
+        # shoulders forward
+        "right_upper_arm:0": 0.9,
+        "left_upper_arm:0":  0.9,
+        # bend elbows
+        "right_lower_arm": -1.2,
+        "left_lower_arm":  -1.2,
     },
 )
 
@@ -155,11 +160,23 @@ class HumanoidTwerkEnvCfg(HumanoidEnvCfg):
     knee_target_rad: float = -0.5
     knee_k: float = 8.0
 
+    #stance
     stance_width_reward_scale: float = 1.0
     stance_width_target_m: float = 0.35
     stance_width_k: float = 30.0
     stance_width_min_m: float = 0.25
     stance_min_reward_scale: float = 0.5
+
+    #toes
+    toe_reward_scale: float = 0.5
+    toe_out_rad: float = 0.35
+    toe_k: float = 10.0
+
+    #hands
+    hands_reward_scale: float = 4.0
+    hands_k: float = 20.0   # higher = tighter hand placement
+    hands_tol_m: float = 0.40   
+    pelvis_min_height: float = 0.95  # tune; squat should still be above this
 
     def __post_init__(self):
         super().__post_init__()

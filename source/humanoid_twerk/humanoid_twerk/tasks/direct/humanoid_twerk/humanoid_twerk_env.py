@@ -24,6 +24,9 @@ class HumanoidTwerkEnv(LocomotionEnv):
         self._lshin = None
         self._rf_body = None
         self._lf_body = None
+        self._rfoot_yaw = None
+        self._lfoot_yaw = None
+
 
     # reset environment index
     def _reset_idx(self, env_ids):
@@ -37,9 +40,15 @@ class HumanoidTwerkEnv(LocomotionEnv):
             self._pelvis_i = body_names.index("pelvis")
             self._rf_body = body_names.index("right_foot")
             self._lf_body = body_names.index("left_foot")
+            self._rh = body_names.index("right_hand")
+            self._lh = body_names.index("left_hand")
+            self._rknee = body_names.index("right_thigh")
+            self._lknee = body_names.index("left_thigh")
 
             self._rshin = joint_names.index("right_shin")
             self._lshin = joint_names.index("left_shin")
+            self._rfoot_yaw = joint_names.index("right_foot:1")
+            self._lfoot_yaw = joint_names.index("left_foot:1")
 
         # baseline pelvis height
         pelvis_z = self.robot.data.body_pos_w[env_ids, self._pelvis_i, 2]
@@ -106,12 +115,53 @@ class HumanoidTwerkEnv(LocomotionEnv):
         fz_rs = self.scene["contact_RS"].data.net_forces_w[:, 0, 2].abs()
         shin_contact = ((fz_ls > th) | (fz_rs > th)).float()
 
+        #check foot angle
+        q = self.robot.data.joint_pos
+
+        rf = q[:, self._rfoot_yaw]
+        lf = q[:, self._lfoot_yaw]
+
+        toe_target = self.cfg.toe_out_rad   # e.g. ±0.35 rad (~20°)
+
+        toe_err = 0.5 * (
+            (rf - (-toe_target)) ** 2 +   # right foot outward
+            (lf - (+toe_target)) ** 2     # left foot outward
+        )
+
+        toe_rew = torch.exp(-self.cfg.toe_k * toe_err)
+
+        #check hands on knees
+        hand_r = self.robot.data.body_pos_w[:, self._rh]
+        hand_l = self.robot.data.body_pos_w[:, self._lh]
+        knee_r = self.robot.data.body_pos_w[:, self._rknee]
+        knee_l = self.robot.data.body_pos_w[:, self._lknee]
+
+        # Euclidean distance
+        d_r = torch.norm(hand_r - knee_r, dim=-1)
+        d_l = torch.norm(hand_l - knee_l, dim=-1)
+
+        # meters, start lenient then tighten later
+        tol = self.cfg.hands_tol_m  # start 0.40
+        d_avg = 0.5 * (d_r + d_l)
+
+        hands_rew = 1.0 - torch.clamp(d_avg / tol, 0.0, 1.0)
+        hands_rew = hands_rew ** 2            # emphasize being really close
+        hands_rew *= both_planted.float()
+
+        if not hasattr(self, "_dbg_hands"):
+            print("mean dr, dl:", d_r.mean().item(), d_l.mean().item(),
+                "min dr, dl:", d_r.min().item(), d_l.min().item())
+            self._dbg_hands = True
+
+
         # calculate final reward
         reward = (
             self.cfg.alive_reward_scale #reward alive
             + self.cfg.twerk_reward_scale * twerk_track #reward twerking 
             + self.cfg.knee_reward_scale * knee_rew #reward bent knees
             + self.cfg.stance_width_reward_scale * stance_rew #reward wide stance
+            + self.cfg.hands_reward_scale * hands_rew #reward hands on knees
+            + self.cfg.toe_reward_scale * toe_rew
             - self.cfg.actions_cost_scale * actions_cost #punish action cost 
             - self.cfg.foot_slip_penalty_scale * slip #punish foot slip
             - self.cfg.shin_contact_penalty * shin_contact #punish on knees
