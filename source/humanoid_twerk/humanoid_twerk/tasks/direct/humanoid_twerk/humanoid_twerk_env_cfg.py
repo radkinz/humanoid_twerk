@@ -22,12 +22,12 @@ WIDE_SQUAT_INIT = ArticulationCfg.InitialStateCfg(
     # IMPORTANT: these are JOINT NAMES from your print
     joint_pos={
         # widen stance (hip ab/adduction-ish)
-        "right_thigh:0": -0.35,
-        "left_thigh:0":  -0.35,
+        "right_thigh:0": -0.25,
+        "left_thigh:0":  -0.25,
 
         # squat (knee/shin bend)
-        "right_shin": -0.9,
-        "left_shin":  -0.9,
+        "right_shin": -0.5,
+        "left_shin":  -0.5,
 
         # # slight ankle compensation (optional)
         "right_foot:0": -0.2,
@@ -58,6 +58,17 @@ class HumanoidTwerkSceneCfg(InteractiveSceneCfg):
         prim_path="/World/envs/env_.*/Robot/right_foot",
         update_period=0.0,
     )
+
+    contact_LS: ContactSensorCfg = ContactSensorCfg(
+    prim_path="/World/envs/env_.*/Robot/left_shin",
+    update_period=0.0,
+    )
+
+    contact_RS: ContactSensorCfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/right_shin",
+        update_period=0.0,
+    )
+
 
 
 @configclass
@@ -154,13 +165,16 @@ class HumanoidTwerkEnvCfg(HumanoidEnvCfg):
     death_cost: float = -1.0
     # knee-bend (shin joints) shaping
     knee_reward_scale: float = 1.0
-    knee_target_rad: float = -0.8   # if bends wrong way, flip to -0.8
+    knee_target_rad: float = -0.5   # if bends wrong way, flip to -0.8
     knee_k: float = 8.0
     stance_width_reward_scale: float = 1.0
     stance_width_target_m: float = 0.35
     stance_width_k: float = 30.0   # higher = tighter tracking
     stance_width_min_m: float = 0.25
     stance_min_reward_scale: float = 0.5
+    foot_slip_penalty_scale: float = 2.0
+    shin_contact_penalty: float = 2.0   # 1–10 depending on how stubborn it is
+
 
 
     def __post_init__(self):

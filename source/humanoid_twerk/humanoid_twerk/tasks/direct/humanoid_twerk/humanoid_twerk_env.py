@@ -72,7 +72,15 @@ class HumanoidTwerkEnv(LocomotionEnv):
         fz_l = self.scene["contact_LF"].data.net_forces_w[:, 0, 2].abs()
         fz_r = self.scene["contact_RF"].data.net_forces_w[:, 0, 2].abs()
         th = self.cfg.contact_force_threshold
+        c_l = (fz_l > th).float()
+        c_r = (fz_r > th).float()
         both_planted = (fz_l > th) & (fz_r > th)  # (num_envs,)
+
+        # compute foot planar velocities 
+        lf_v = self.robot.data.body_lin_vel_w[:, self._lf_body, 0:2]   # (num_envs, 2)
+        rf_v = self.robot.data.body_lin_vel_w[:, self._rf_body, 0:2]
+        slip = c_l * (lf_v.norm(dim=-1) ** 2) + c_r * (rf_v.norm(dim=-1) ** 2)
+
 
         # --- knees planted
         q = self.robot.data.joint_pos  # (num_envs, num_joints)
@@ -138,11 +146,16 @@ class HumanoidTwerkEnv(LocomotionEnv):
             - self.cfg.jump_actions_cost_scale * actions_cost #punish jumping aka reward feet planted
             + self.cfg.knee_reward_scale * knee_rew #reward knees planted
             + self.cfg.stance_width_reward_scale * stance_rew
+            - self.cfg.foot_slip_penalty_scale * slip #penalize walking
         )
 
-        w_min = self.cfg.stance_width_min_m
-        stance_min = torch.clamp((stance_w - w_min) / w_min, 0.0, 1.0)
-        reward += both_planted.float() * self.cfg.stance_min_reward_scale * stance_min
+    
+        fz_ls = self.scene["contact_LS"].data.net_forces_w[:, 0, 2].abs()
+        fz_rs = self.scene["contact_RS"].data.net_forces_w[:, 0, 2].abs()
+
+        shin_contact = ((fz_ls > th) | (fz_rs > th)).float()
+        reward -= self.cfg.shin_contact_penalty * shin_contact
+
 
 
         # death / terminated handling
